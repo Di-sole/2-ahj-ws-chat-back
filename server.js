@@ -46,44 +46,68 @@ if (ctx.request.get('Access-Control-Request-Method')) {
 }
 });
 
-const contacts = [];
+// => ROUTER
+
 const router = new Router();
 
-router.get('/contacts', async (ctx, next) => {
-  // return list of contacts
-  console.log('contacts');
-  ctx.response.body = contacts;
-});
-router.post('/contacts', async (ctx, next) => {
-  // create new contact
-  contacts.push({...ctx.request.body, id: uuid.v4()});
-  ctx.response.status = 204
-});
-router.delete('/contacts/:id', async (ctx, next) => {
-  // remove contact by id (ctx.params.id)
-  const index = contacts.findIndex(({ id }) => id === ctx.params.id);
-  if (index !== -1) {
-    contacts.splice(index, 1);
-  };
-  ctx.response.status = 204
+router.get('/', async (ctx, next) => {
+  ctx.response.body = 'hello';
 });
 
 app.use(router.routes()).use(router.allowedMethods());
+
+// => WS Server
 
 const port = process.env.PORT || 7070;
 const server = http.createServer(app.callback());
 const wsServer = new WS.Server({ server });
 
-wsServer.on('connection', (ws, req) => {
-  ws.on('message', msg => {
-    // console.log('msg');
-    // ws.send('response');
-    [...wsServer.clients]
-    .filter(o => o.readyState === WS.OPEN)
-    .forEach(o => o.send('some message'));
-  });
+const contacts = [];
 
-  ws.send('welcome');
+wsServer.on('connection', (ws, req) => {
+  ws.on('message', async (e) => {
+		const msg = JSON.parse(e.toString());
+
+		switch (msg.type) {
+			case 'addContact':
+				const contact = contacts.find(({ name }) => name === msg.name);
+				
+				if (contact) {
+					ws.send(JSON.stringify({ type: 'logIn', data: 'fail' }));
+					return;
+				} else {
+					contacts.push({name: msg.name});
+					ws.send(JSON.stringify({ type: 'logIn', data: 'success' }));
+				}
+	
+				[...wsServer.clients]
+				.filter(client => client.readyState === WS.OPEN)
+				.forEach(client => client.send(JSON.stringify({ type: 'contacts', data: contacts })));
+				break;
+			case 'addMessage':
+				const message = {
+					name: msg.name,
+					date: msg.date,
+					text: msg.text,
+				};
+	
+				[...wsServer.clients]
+				.filter(client => client.readyState === WS.OPEN)
+				.forEach(client => client.send(JSON.stringify({ type: 'newMessage', data: message })));
+				break;
+			case 'deleteContact':
+				const index = contacts.findIndex(({ name }) => name === msg.name);
+				contacts.splice(index, 1);
+				
+				[...wsServer.clients]
+				.filter(client => client.readyState === WS.OPEN)
+				.forEach(client => client.send(JSON.stringify({ type: 'contacts', data: contacts })));
+				break;
+			default:
+				ws.send(JSON.stringify('what are you doing? :)'));
+				return;
+		}
+	});
 });
 
 server.listen(port);
